@@ -1,19 +1,17 @@
 import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
-  // 1. Initial Safeguard: Check for the API Key
+  // 1. Validate the API Key exists
   const apiKey = process.env.HUGGINGFACE_API_KEY;
   if (!apiKey) {
-    return NextResponse.json({ 
-      error: "API Key is missing. Add HUGGINGFACE_API_KEY to Vercel and .env.local" 
-    }, { status: 500 });
+    return NextResponse.json({ error: "HUGGINGFACE_API_KEY is missing from environment variables." }, { status: 500 });
   }
 
   try {
     const { messages, system } = await req.json();
 
-    // The official Hugging Face path for Kimi K2.6
-    const model = "moonshotai/Kimi-K2.6";
+    // Mistral-Nemo-12B: The best balance of "Free" and "Smart" in 2026
+    const model = "mistralai/Mistral-Nemo-Instruct-2407";
 
     const response = await fetch(
       `https://api-inference.huggingface.co/models/${model}`,
@@ -22,52 +20,48 @@ export async function POST(req: Request) {
         headers: {
           "Authorization": `Bearer ${apiKey}`,
           "Content-Type": "application/json",
-          "x-wait-for-model": "true" // CRITICAL: Keeps the request alive while Kimi "wakes up"
+          "x-wait-for-model": "true" // Important: Wakes the model up if it's sleeping
         },
         body: JSON.stringify({
-          // Kimi uses standard chat templates, but we'll format the prompt clearly
-          inputs: `<|im_start|>system\n${system || "You are NEXUS, a helpful assistant."}<|im_end|>\n<|im_start|>user\n${messages[messages.length - 1].content}<|im_end|>\n<|im_start|>assistant\n`,
+          inputs: `<s>[INST] ${system || "You are NEXUS, a helpful AI."} ${messages[messages.length - 1].content} [/INST]`,
           parameters: {
-            max_new_tokens: 1000,
+            max_new_tokens: 800,
             temperature: 0.7,
+            top_p: 0.95,
             return_full_text: false
           }
         }),
       }
     );
 
-    // 2. Handle non-JSON (HTML) responses
+    // 2. Prevent the "HTML instead of JSON" crash
     const contentType = response.headers.get("content-type");
     if (!contentType || !contentType.includes("application/json")) {
-      const textError = await response.text();
-      console.error("Non-JSON Response received:", textError.substring(0, 200));
+      const errorText = await response.text();
+      console.error("API returned non-JSON:", errorText.substring(0, 100));
       return NextResponse.json({ 
-        error: "API returned HTML instead of JSON. The model might be temporarily unavailable or the URL is incorrect.",
-        status: response.status 
-      }, { status: 500 });
+        error: "The AI service is currently waking up or unavailable. Please wait 10 seconds and try again." 
+      }, { status: 503 });
     }
 
     const result = await response.json();
 
-    // 3. Handle Hugging Face specific error codes
+    // 3. Handle Hugging Face errors (like 429 or 503)
     if (result.error) {
-      return NextResponse.json({ error: result.error }, { status: response.status || 500 });
+      return NextResponse.json({ error: result.error }, { status: response.status });
     }
 
-    // 4. Parse the output (Kimi/Hugging Face returns an array)
+    // 4. Extract and clean the AI's answer
     if (Array.isArray(result) && result[0]?.generated_text) {
-      let output = result[0].generated_text;
-      
-      // Clean up any remaining chat tokens if the model left them in
-      output = output.replace("<|im_end|>", "").replace("<|im_start|>", "").trim();
-      
-      return NextResponse.json({ content: output });
+      // Mistral usually appends the answer after the prompt; we trim it
+      const cleanOutput = result[0].generated_text.trim();
+      return NextResponse.json({ content: cleanOutput });
     }
 
-    return NextResponse.json({ error: "Unexpected response format from Kimi API" }, { status: 500 });
+    return NextResponse.json({ error: "The AI returned an empty response." }, { status: 500 });
 
   } catch (err: any) {
-    console.error("Route Crash:", err);
-    return NextResponse.json({ error: "Internal Server Crash: " + err.message }, { status: 500 });
+    console.error("Critical Route Error:", err);
+    return NextResponse.json({ error: "Internal Server Error: " + err.message }, { status: 500 });
   }
 }
