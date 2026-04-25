@@ -2,70 +2,47 @@ import { NextResponse } from 'next/server';
 
 export async function POST(req: Request) {
   try {
-    // 1. Extract data from the frontend request
-    const { model, system, messages, max_tokens } = await req.json();
-    
-    // 2. Grab the API Key from the Vercel Environment Variables
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const { system, messages } = await req.json();
+    const apiKey = process.env.HUGGINGFACE_API_KEY;
 
     if (!apiKey) {
-      console.error("API Error: OPENROUTER_API_KEY is missing from environment.");
-      return NextResponse.json(
-        { error: "API Key not found on server. Check Vercel Environment Variables." },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Hugging Face Key missing" }, { status: 500 });
     }
 
-    // 3. Talk to OpenRouter
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "http://localhost:3000", // Required by some OpenRouter models
-        "X-Title": "NEXUS Evolve",
-      },
-      body: JSON.stringify({
-        // Using Gemini Flash Lite as the default because it has more stable free-tier limits
-        model: model || "google/gemini-2.0-flash-lite-preview-02-05:free",
-        messages: [
-          { role: "system", content: system || "You are NEXUS, a helpful AI assistant." },
-          ...messages
-        ],
-        max_tokens: max_tokens || 1000,
-      }),
-    });
+    // Using DeepSeek-R1-Distill-Llama-8B (One of the best free performers right now)
+    const model = "deepseek-ai/DeepSeek-R1-Distill-Llama-8B";
 
-    // 4. Handle non-OK responses (like your 429)
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error("OpenRouter Error Details:", errorData);
-      
-      return NextResponse.json(
-        { 
-          error: errorData.error?.message || `OpenRouter returned status ${response.status}`,
-          code: response.status 
-        }, 
-        { status: response.status }
-      );
+    const response = await fetch(
+      `https://api-inference.huggingface.co/models/${model}`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          // Hugging Face standard text-gen format
+          inputs: `<|system|>\n${system || "You are NEXUS."}\n<|user|>\n${messages[messages.length - 1].content}\n<|assistant|>`,
+          parameters: {
+            max_new_tokens: 500,
+            temperature: 0.7,
+            return_full_text: false
+          }
+        }),
+      }
+    );
+
+    const result = await response.json();
+
+    // Hugging Face returns an array: [{ "generated_text": "..." }]
+    if (Array.isArray(result) && result[0]?.generated_text) {
+      return NextResponse.json({ content: result[0].generated_text });
+    } else {
+      console.error("HF Error:", result);
+      return NextResponse.json({ error: "HF API Error", details: result }, { status: 500 });
     }
-
-    const data = await response.json();
-
-    // 5. Final check of the data structure
-    if (!data.choices || !data.choices[0]) {
-      return NextResponse.json({ error: "Invalid response format from AI provider." }, { status: 500 });
-    }
-
-    return NextResponse.json({ 
-      content: data.choices[0].message.content 
-    });
 
   } catch (error: any) {
-    console.error("Internal Server Error:", error);
-    return NextResponse.json(
-      { error: error.message || "An unexpected error occurred." }, 
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
