@@ -10,8 +10,8 @@ export async function POST(req: Request) {
   try {
     const { messages, system } = await req.json();
 
-    // Mistral-Nemo-12B: The best balance of "Free" and "Smart" in 2026
-    const model = "mistralai/Mistral-Nemo-Instruct-2407";
+    // Replace the Mistral-Nemo line with this one:
+    const model = "HuggingFaceTB/SmolLM2-1.7B-Instruct";
 
     const response = await fetch(
       `https://api-inference.huggingface.co/models/${model}`,
