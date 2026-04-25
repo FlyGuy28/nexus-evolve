@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 
-export async function POST(req) {
+export async function POST(req: NextRequest) {
   try {
     const { messages, system, model } = await req.json();
 
@@ -35,6 +36,7 @@ export async function POST(req) {
     
     return NextResponse.json({ content });
   } catch (e) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    const errorMessage = e instanceof Error ? e.message : 'Unknown error';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
